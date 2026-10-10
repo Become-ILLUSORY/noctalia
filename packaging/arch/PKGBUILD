@@ -1,0 +1,83 @@
+# Maintainer: Become-ILLUSORY <becomeillusory@gmail.com>
+#
+# Noctalia with the immersive bar tint, from github.com/Become-ILLUSORY/noctalia.
+# Keeps upstream's package name so it replaces extra/noctalia; the pkgrel suffix
+# marks the local build.
+#
+# Build with the helper, which stages the source tarball this PKGBUILD expects:
+#
+#   ./build-package.sh
+#
+# It works on Arch directly and inside an Arch container, and is what CI runs.
+
+pkgname=noctalia
+pkgver=5.2.1
+pkgrel=1.immersive
+pkgdesc="A sleek, customizable desktop shell crafted for Wayland (immersive bar tint fork)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Become-ILLUSORY/noctalia"
+license=('MIT')
+depends=(
+  'bash' 'cairo' 'curl' 'fontconfig' 'freetype2' 'git' 'glib2' 'glibc' 'harfbuzz'
+  'hicolor-icon-theme' 'jemalloc' 'libgcc' 'libglvnd' 'libical' 'libjxl'
+  'libpipewire' 'libqalculate' 'librsvg' 'libsecret' 'libsndfile' 'libsodium'
+  'libstdc++' 'libwebp' 'libwireplumber' 'libxkbcommon' 'libxml2' 'md4c' 'pam'
+  'pango' 'polkit' 'sdbus-cpp' 'tomlplusplus' 'wayland'
+)
+makedepends=('meson' 'ninja' 'nlohmann-json' 'pkgconf' 'stb' 'wayland-protocols')
+optdepends=(
+  'ddcutil: monitor brightness control'
+  'power-profiles-daemon: power profile management'
+  'upower: battery and power device integration'
+)
+# Same name as extra/noctalia, so pacman swaps between the two cleanly instead
+# of reporting a file conflict on upgrade.
+provides=('noctalia')
+conflicts=('noctalia')
+
+# A local tarball rather than a URL: the point of this PKGBUILD is to package
+# this working tree, and build-package.sh creates the archive beside it. The
+# checksum is generated per build, so it is not pinned here.
+source=("noctalia-immersive-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "noctalia-immersive-${pkgver}"
+
+  # Release build with tests off, as PACKAGING.md directs for packagers; CI
+  # already runs the debug build and the unit tests.
+  meson setup build \
+    --prefix=/usr \
+    --buildtype=release \
+    --strip \
+    -Dcpp_std=c++23 \
+    -Dtests=disabled \
+    -Djemalloc=enabled
+  meson compile -C build
+}
+
+check() {
+  cd "noctalia-immersive-${pkgver}"
+
+  # Smoke tests that need no compositor: the binary runs and can emit its
+  # completion scripts.
+  ./build/noctalia --version > /dev/null
+  ./build/noctalia completions bash > /dev/null
+}
+
+package() {
+  cd "noctalia-immersive-${pkgver}"
+
+  meson install -C build --destdir "$pkgdir"
+
+  # Completions are generated from the freshly built binary rather than
+  # installed by Meson, so cross-compilation is not broken (PACKAGING.md).
+  ./build/noctalia completions bash > "$srcdir/noctalia.bash"
+  ./build/noctalia completions zsh > "$srcdir/_noctalia"
+  ./build/noctalia completions fish > "$srcdir/noctalia.fish"
+  install -Dm644 "$srcdir/noctalia.bash" "$pkgdir/usr/share/bash-completion/completions/noctalia"
+  install -Dm644 "$srcdir/_noctalia" "$pkgdir/usr/share/zsh/site-functions/_noctalia"
+  install -Dm644 "$srcdir/noctalia.fish" "$pkgdir/usr/share/fish/vendor_completions.d/noctalia.fish"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
