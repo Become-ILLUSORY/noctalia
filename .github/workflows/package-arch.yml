@@ -52,8 +52,11 @@ jobs:
           rm -rf /home/builder/src/.git
           chown -R builder:builder /home/builder/src
 
+          # -s lets makepkg install the PKGBUILD's makedepends and depends
+          # through sudo; the container is bare, so without it every runtime
+          # dependency reads as missing. The builder user has NOPASSWD sudo.
           cd /home/builder/src
-          sudo -u builder ./packaging/arch/build-package.sh
+          sudo -u builder ./packaging/arch/build-package.sh -s
 
       - name: Inspect package
         run: |
