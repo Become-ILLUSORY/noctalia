@@ -67,7 +67,10 @@ jobs:
           # Upstream's own package trips the same checks; do not gate on this.
           namcap ./*.pkg.tar.zst || true
           echo "--- contents ---"
-          bsdtar -tf ./*.pkg.tar.zst | head -40
+          # The debug package is separate and intentionally tiny; inspect the
+          # main one so the listing is meaningful.
+          main_pkg=$(ls -S ./*.pkg.tar.zst | head -n1)
+          bsdtar -tf "$main_pkg" | head -40
 
       - name: Collect artifacts
         run: |
