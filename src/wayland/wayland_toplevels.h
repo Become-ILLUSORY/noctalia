@@ -56,6 +56,12 @@ struct WlrToplevelSnapshot {
   wl_output* output = nullptr;
   bool activated = false;
   bool minimized = false;
+  // Whether the compositor reports this window filling its work area. An
+  // immersive bar only samples content that actually abuts it, which is the
+  // maximized/fullscreen case; a floating window next to the bar leaves the
+  // user's own bar styling alone.
+  bool maximized = false;
+  bool fullscreen = false;
   std::uint64_t order = 0;
 };
 
@@ -124,6 +130,8 @@ private:
     std::vector<wl_output*> activeOutputs;
     bool activated = false;
     bool minimized = false;
+    bool maximized = false;
+    bool fullscreen = false;
     bool dirty = false;
     // Set on the first output_enter, never cleared: distinguishes "never announced an output"
     // from "left every output".

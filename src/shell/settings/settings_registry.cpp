@@ -3458,6 +3458,19 @@ namespace settings {
             ToggleSetting{bar.compositorBlur}, "blur frosted background effect wayland"
         ));
       }
+      {
+        auto e = makeEntry(
+            section, "effects", tr("settings.schema.bar.immersive.label"),
+            tr("settings.schema.bar.immersive.description"), path("immersive"), ToggleSetting{bar.immersive},
+            "immersive adaptive tint dynamic color status bar sample screen"
+        );
+        // The sampler is fed by screencopy, so without it the toggle is not
+        // offered at all rather than silently doing nothing.
+        if (!env.screencopySupported) {
+          continue;
+        }
+        entries.push_back(std::move(e));
+      }
       entries.push_back(makeEntry(
           section, "effects", tr("settings.schema.shared.shadow.label"), tr("settings.schema.bar.shadow.description"),
           path("shadow"), ToggleSetting{bar.shadow}, "shadow"

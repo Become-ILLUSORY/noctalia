@@ -5,6 +5,7 @@
 #include "render/animation/animation_manager.h"
 #include "render/scene/input_area.h"
 #include "render/scene/node.h"
+#include "shell/bar/bar_tint.h"
 #include "shell/bar/widget_action_dispatcher.h"
 #include "shell/bar/widget_gesture_defaults.h"
 #include "ui/builders.h"
@@ -28,6 +29,12 @@ Widget::~Widget() {
 }
 
 ColorSpec Widget::widgetForegroundOr(const ColorSpec& fallback) const noexcept {
+  // Immersive wins over everything: while the bar is deriving its colors from
+  // the content behind it, a configured `color` would put the ink back on a
+  // fixed value the backdrop knows nothing about.
+  if (m_immersiveForeground.has_value()) {
+    return *m_immersiveForeground;
+  }
   // Per-widget `color` must win over bar/widget `capsule_foreground`, otherwise a bar-level
   // capsule_foreground (e.g. on_primary) overrides explicit `color = primary` after layout.
   if (m_widgetForeground.has_value()) {
@@ -43,10 +50,32 @@ ColorSpec Widget::widgetForegroundOr(const ColorSpec& fallback) const noexcept {
 ColorSpec Widget::widgetIconColorOr(const ColorSpec& fallback) const noexcept {
   // `icon_color` overrides; otherwise the icon inherits the full foreground chain
   // (`color` → `capsule_foreground` → fallback), so a bare `color` still tints icons.
+  if (m_immersiveForeground.has_value()) {
+    return *m_immersiveForeground;
+  }
   if (m_widgetIconColor.has_value()) {
     return *m_widgetIconColor;
   }
   return widgetForegroundOr(fallback);
+}
+
+Color Widget::resolveAccent(const Color& accent) const {
+  if (!m_immersiveBackdrop.has_value()) {
+    return accent;
+  }
+  noctalia::bar::tint::Style style;
+  style.backdrop = *m_immersiveBackdrop;
+  style.valid = true;
+  return noctalia::bar::tint::adjustAccent(accent, style);
+}
+
+ColorSpec Widget::resolveAccentSpec(const ColorSpec& accent) const {
+  if (!m_immersiveBackdrop.has_value()) {
+    return accent;
+  }
+  // A semantic accent has to stay recognizable, so it is corrected to the
+  // non-text contrast floor rather than being folded into the foreground.
+  return fixedColorSpec(resolveAccent(resolveColorSpec(accent)));
 }
 
 bool Widget::shouldShowBarCapsule() const {

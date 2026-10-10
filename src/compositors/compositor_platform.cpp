@@ -1358,6 +1358,43 @@ std::vector<std::string> CompositorPlatform::workspaceDisplayKeys(wl_output* out
   return {};
 }
 
+bool CompositorPlatform::hasWorkAreaFillingWindow(wl_output* output) const {
+  if (output == nullptr) {
+    return false;
+  }
+
+  // Precise signal: a toplevel the compositor reports as maximized or
+  // fullscreen on this output. Available wherever wlr-foreign-toplevel-management
+  // is, and covers the floating-WM case exactly.
+  bool maximized = false;
+  m_wayland.visitWlrToplevels([&](const WlrToplevelSnapshot& toplevel) {
+    if (maximized || toplevel.minimized) {
+      return;
+    }
+    if (toplevel.output != output) {
+      return;
+    }
+    if (toplevel.maximized || toplevel.fullscreen) {
+      maximized = true;
+    }
+  });
+  if (maximized) {
+    return true;
+  }
+
+  // Tiling compositors fill the work area with ordinary windows that are never
+  // reported as "maximized" — niri's scrolling columns are the canonical case,
+  // and niri is exactly where this feature matters. For those, an occupied
+  // active workspace on this output is the same statement: content reaches the
+  // bar's inner edge.
+  for (const auto& workspace : workspaces(output)) {
+    if (workspace.active) {
+      return workspace.occupied;
+    }
+  }
+  return false;
+}
+
 std::vector<WorkspaceWindowAssignment> CompositorPlatform::workspaceWindowAssignments(wl_output* outputFilter) const {
   if (compositors::isKde() && m_kwinActiveWindow != nullptr && m_kwinActiveWindow->isAvailable()) {
     const auto tracked =

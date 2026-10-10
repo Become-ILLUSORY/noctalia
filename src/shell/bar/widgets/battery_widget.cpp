@@ -368,7 +368,7 @@ void BatteryWidget::syncPalette() {
       && m_lastPct >= 0.0
       && std::round(m_lastPct) <= m_warningThreshold
       && !batteryStatePlugged(m_lastState).value_or(false);
-  const ColorSpec foreground = isWarning ? m_warningColor : normalFg;
+  const ColorSpec foreground = isWarning ? resolveAccentSpec(m_warningColor) : normalFg;
 
   if (m_showLabel) {
     // Same light-on-dark body as the unlabelled battery, so it matches neighbouring glyphs. The track stays opaque and
@@ -488,9 +488,10 @@ void BatteryWidget::syncState(Renderer& renderer) {
       m_overlayGlyph->setVisible(stateGlyph != nullptr);
     }
   } else if (m_displayMode == BatteryDisplayMode::Glyph) {
-    const ColorSpec iconColor = isWarning ? m_warningColor : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface));
+    const ColorSpec iconColor =
+        isWarning ? resolveAccentSpec(m_warningColor) : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface));
     const ColorSpec labelColor =
-        isWarning ? m_warningColor : widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
+        isWarning ? resolveAccentSpec(m_warningColor) : widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
 
     if (m_glyph != nullptr) {
       m_glyph->setGlyph(batteryGlyphName(s.percentage, s.state));
@@ -507,7 +508,7 @@ void BatteryWidget::syncState(Renderer& renderer) {
     }
   } else if (m_displayMode == BatteryDisplayMode::None) {
     const ColorSpec normalFgColor = widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface));
-    const ColorSpec fgColor = isWarning ? m_warningColor : normalFgColor;
+    const ColorSpec fgColor = isWarning ? resolveAccentSpec(m_warningColor) : normalFgColor;
 
     if (m_label != nullptr && m_showLabel) {
       m_label->setFontSize((m_isVertical ? Style::fontSizeCaption : Style::fontSizeBody) * fontScale());

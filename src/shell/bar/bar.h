@@ -1,14 +1,18 @@
 #pragma once
 
+#include "capture/screencopy_capture.h"
+#include "capture/screencopy_util.h"
 #include "core/timer_manager.h"
 #include "ipc/ipc_invocation_context.h"
 #include "shell/bar/bar_instance.h"
 #include "shell/bar/bar_services.h"
+#include "shell/bar/bar_tint.h"
 #include "shell/bar/widget_action_dispatcher.h"
 #include "shell/bar/widget_factory.h"
 #include "ui/dialogs/layer_popup_host.h"
 #include "wayland/surface.h"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -20,6 +24,7 @@
 class TaskbarWidget;
 
 class ConfigService;
+class WaylandConnection;
 class CompositorPlatform;
 class FileWatcher;
 class HttpClient;
@@ -153,7 +158,24 @@ private:
   void applyPendingWorkspaceReveal();
   void reevaluateSmartAutoHide();
   void startHideFadeOut(BarInstance& instance);
+  // Immersive: repaints the capsule runs against the current immersive style.
+  // The run's fill spec is resolved from the palette when the run is built, so a
+  // derived style change has to overwrite the fill on the run's Box directly.
+  static void applyBarCapsuleStyles(BarInstance& instance);
   static void applyBackgroundPalette(BarInstance& instance);
+  // Immersive bars: kick a capture of the screen strip the bar abuts, reduce it
+  // to a noctalia::bar::tint::Style, and apply it to the instance. Sampling is debounced and
+  // delta-gated so window churn cannot turn into a strobe.
+  void onImmersiveStateChanged();
+  void scheduleImmersiveSample(BarInstance& instance, std::chrono::milliseconds delay);
+  void sampleImmersive(BarInstance& instance);
+  void applyImmersiveStyle(BarInstance& instance, const noctalia::bar::tint::Style& style);
+  void clearImmersiveStyle(BarInstance& instance);
+  [[nodiscard]] std::optional<LogicalRect> immersiveSampleRegion(const BarInstance& instance) const;
+  [[nodiscard]] bool immersiveSupported() const noexcept;
+  // Whether immersive currently applies to this instance: enabled, supported, and
+  // a window filling the work area the bar is anchored against.
+  [[nodiscard]] bool immersiveWantsStyle(const BarInstance& instance) const;
   [[nodiscard]] std::string showBarIpc(std::string_view args);
   [[nodiscard]] std::string hideBarIpc(std::string_view args);
   [[nodiscard]] std::string toggleBarIpc(std::string_view args);
@@ -219,4 +241,13 @@ private:
   bool m_overlayDisplaySuppressed = false;
   bool m_wasVisibleBeforeOverlaySuppress = false;
   bool m_smartAutoHideReevalQueued = false;
+
+  // Immersive sampling. The capture connection is created lazily on the first
+  // sample and torn down with the bar, since it only exists to feed the
+  // sampler; one capture is in flight at a time across all outputs.
+  std::unique_ptr<WaylandConnection> m_immersiveWayland;
+  std::unique_ptr<ScreencopyCapture> m_immersiveCapture;
+  Timer m_immersiveDebounce;
+  std::unordered_set<std::uint32_t> m_immersivePendingOutputs;
+  bool m_immersiveCaptureFailed = false;
 };

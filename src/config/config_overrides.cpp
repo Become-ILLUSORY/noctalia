@@ -191,6 +191,9 @@ namespace {
     if (ovr.compositorBlur) {
       resolved.compositorBlur = *ovr.compositorBlur;
     }
+    if (ovr.immersive) {
+      resolved.immersive = *ovr.immersive;
+    }
     if (ovr.border) {
       resolved.border = *ovr.border;
     }

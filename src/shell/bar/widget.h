@@ -114,6 +114,22 @@ public:
   void setBarCapsuleSpec(WidgetBarCapsuleSpec spec) noexcept { m_barCapsuleSpec = std::move(spec); }
   void setWidgetForeground(std::optional<ColorSpec> color) noexcept { m_widgetForeground = color; }
   void setWidgetIconColor(std::optional<ColorSpec> color) noexcept { m_widgetIconColor = color; }
+  // Immersive bar: overrides every configured foreground while the bar derives
+  // its colors from the screen content it abuts. Set by the bar, not by widget
+  // config, so `color` / `capsule_foreground` stay intact for when immersive is
+  // switched back off.
+  void setImmersiveForeground(std::optional<ColorSpec> color) noexcept { m_immersiveForeground = color; }
+  // Re-colors a semantic accent (battery warning, mute, error) for legibility on
+  // the immersive backdrop. No-op when the bar is not immersive, so widgets can
+  // call it unconditionally at their accent sites.
+  [[nodiscard]] Color resolveAccent(const Color& accent) const;
+  // Same, for the ColorSpec the widget configs carry. Resolves the spec first so a
+  // role-based accent is corrected against the backdrop like a fixed one.
+  [[nodiscard]] ColorSpec resolveAccentSpec(const ColorSpec& accent) const;
+  // Immersive backdrop, present only while the bar is immersive. Widgets use it
+  // to decide polarity when they render their own light/dark variants.
+  [[nodiscard]] const std::optional<Color>& immersiveBackdrop() const noexcept { return m_immersiveBackdrop; }
+  void setImmersiveBackdrop(std::optional<Color> backdrop) noexcept { m_immersiveBackdrop = std::move(backdrop); }
   void setNonInteractive(bool nonInteractive) noexcept;
   [[nodiscard]] bool nonInteractive() const noexcept { return m_nonInteractive; }
   // Bar-owned: blocks all pointer input while the member is clipped out of a collapsed accordion.
@@ -183,6 +199,11 @@ protected:
   WidgetBarCapsuleSpec m_barCapsuleSpec{};
   std::optional<ColorSpec> m_widgetForeground;
   std::optional<ColorSpec> m_widgetIconColor;
+  // Immersive foreground plus the backdrop it was derived against. Widgets read
+  // both through widgetForegroundOr()/resolveAccent(); the backdrop is what
+  // accents are pulled back against so warnings stay legible on any content.
+  std::optional<ColorSpec> m_immersiveForeground;
+  std::optional<Color> m_immersiveBackdrop;
   bool m_nonInteractive = false;
   bool m_barPointerSuppressed = false;
   Node* m_capsuleShell = nullptr;

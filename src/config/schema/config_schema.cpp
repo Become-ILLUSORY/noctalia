@@ -2438,6 +2438,7 @@ namespace noctalia::config::schema {
         optionalIntField(&BarMonitorOverride::thickness, "thickness", kBarThicknessRange),
         optionalFloatField(&BarMonitorOverride::backgroundOpacity, "background_opacity", kBarOpacityRange),
         optionalBoolField(&BarMonitorOverride::compositorBlur, "compositor_blur"),
+        optionalBoolField(&BarMonitorOverride::immersive, "immersive"),
         optionalColorField(&BarMonitorOverride::border, "border"),
         optionalFloatField(&BarMonitorOverride::borderWidth, "border_width", kBarBorderWidthRange),
         optionalIntField(&BarMonitorOverride::radius, "radius", kBarRadiusRange),

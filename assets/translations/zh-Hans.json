@@ -1951,6 +1951,10 @@
           "description": "鼠标悬停时，使用小组件自身的前景色为其轻微着色",
           "label": "悬停高亮"
         },
+        "immersive": {
+          "label": "沉浸式",
+          "description": "让状态栏从紧挨其后的窗口内容中自动取色，背景、透明度与文字颜色都随内容变化，类似手机状态栏跟随应用配色。当窗口铺满工作区时，状态栏接管 background_opacity、compositor_blur 与组件颜色；没有窗口紧挨状态栏时，恢复使用用户自己的设置。"
+        },
         "layer": {
           "description": "使用 Overlay 可使状态栏显示在全屏应用上方，Top 则在全屏时被覆盖；吸附面板会跟随状态栏",
           "label": "Wayland 层级"

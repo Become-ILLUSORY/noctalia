@@ -147,12 +147,14 @@ void VolumeWidget::syncState(Renderer& renderer) {
   if (m_image != nullptr) {
     widget_custom_image::sync(
         *m_image, renderer, m_customImage, m_contentScale,
-        muted ? m_muteColor : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface))
+        muted ? resolveAccentSpec(m_muteColor) : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface))
     );
   } else {
     m_glyph->setGlyph(glyphName(volume, muted, effectsProfile));
     m_glyph->setGlyphSize(Style::baseGlyphSize * m_contentScale);
-    m_glyph->setColor(muted ? m_muteColor : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface)));
+    m_glyph->setColor(
+        muted ? resolveAccentSpec(m_muteColor) : widgetIconColorOr(colorSpecFromRole(ColorRole::OnSurface))
+    );
     m_glyph->measure(renderer);
   }
 
@@ -161,7 +163,9 @@ void VolumeWidget::syncState(Renderer& renderer) {
     int pct = static_cast<int>(std::round(volume * 100.0F));
     m_label->setFontSize((m_isVertical ? Style::fontSizeCaption : Style::fontSizeBody) * fontScale());
     m_label->setText(m_isVertical ? std::to_string(pct) : std::to_string(pct) + "%");
-    m_label->setColor(muted ? m_muteColor : widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface)));
+    m_label->setColor(
+        muted ? resolveAccentSpec(m_muteColor) : widgetForegroundOr(colorSpecFromRole(ColorRole::OnSurface))
+    );
     m_label->measure(renderer);
   }
 

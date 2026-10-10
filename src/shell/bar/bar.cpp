@@ -46,6 +46,15 @@ namespace {
   constexpr std::chrono::milliseconds kWorkspacePeekHold{450};
   constexpr std::int32_t kAutoHideTriggerPx = 3;
   constexpr float kAutoHideSlideExtraPx = 4.0F;
+  // Immersive sampling: how far past the bar's inner edge the captured strip
+  // reaches, how long a burst of window changes is allowed to settle before the
+  // capture runs, and the per-channel change below which a derived style is not
+  // worth a repaint.
+  constexpr std::int32_t kImmersiveSampleBandPx = 24;
+  constexpr std::chrono::milliseconds kImmersiveInitialDelay{250};
+  constexpr std::chrono::milliseconds kImmersiveChangeDelay{120};
+  constexpr auto kImmersiveCaptureTimeout = std::chrono::milliseconds(500);
+  constexpr float kImmersiveColorDelta = 0.03F;
 
   [[nodiscard]] std::string activeWorkspaceId(const std::vector<Workspace>& workspaces) {
     for (const auto& workspace : workspaces) {
@@ -1527,6 +1536,20 @@ void Bar::onSecondTick() {
       inst->surface->requestUpdate();
     }
   }
+  // Immersive bars re-sample on the second tick as a floor: window content can
+  // change without any compositor event (a video, a theme switch inside an app),
+  // and the delta gate in sampleImmersive keeps this from repainting for
+  // content that did not actually move.
+  for (auto& inst : m_instances) {
+    if (inst == nullptr) {
+      continue;
+    }
+    if (immersiveWantsStyle(*inst)) {
+      scheduleImmersiveSample(*inst, kImmersiveChangeDelay);
+    } else {
+      clearImmersiveStyle(*inst);
+    }
+  }
 }
 
 void Bar::reload() {
@@ -1647,6 +1670,7 @@ void Bar::reload() {
   }
 
   syncInstances();
+  onImmersiveStateChanged();
 }
 
 void Bar::closeAllInstances() {
@@ -1803,6 +1827,16 @@ void Bar::refresh() {
       if (inst->animations.hasActive() || instanceNeedsFrameTick(*inst)) {
         inst->surface->requestRedraw();
       }
+    }
+    // refresh() is the shell's "the window/workspace picture changed" hook, which
+    // is exactly when the content abutting an immersive bar may have changed.
+    if (inst == nullptr) {
+      continue;
+    }
+    if (immersiveWantsStyle(*inst)) {
+      scheduleImmersiveSample(*inst, kImmersiveChangeDelay);
+    } else {
+      clearImmersiveStyle(*inst);
     }
   }
 }
@@ -3082,10 +3116,268 @@ void Bar::applyBackgroundPalette(BarInstance& instance) {
     return;
   }
   auto style = instance.bg->style();
-  style.fill = colorForRole(ColorRole::Surface, instance.barConfig.backgroundOpacity);
+  if (instance.immersiveStyle.has_value()) {
+    // Immersive owns the fill and its alpha; the configured border stays so the
+    // outline still matches the rest of the shell's chrome.
+    style.fill = withAlpha(instance.immersiveStyle->surface, instance.immersiveStyle->opacity);
+  } else {
+    style.fill = colorForRole(ColorRole::Surface, instance.barConfig.backgroundOpacity);
+  }
   style.border = resolveColorSpec(instance.barConfig.border);
   style.borderWidth = instance.barConfig.borderWidth;
   instance.bg->setStyle(style);
+}
+
+bool Bar::immersiveSupported() const noexcept {
+  return m_platform != nullptr && m_platform->wayland().hasScreencopy() && m_platform->wayland().shm() != nullptr;
+}
+
+// The strip the bar abuts: the window's top edge for a top bar, bottom edge for a
+// bottom bar, and the matching vertical edge for a side bar. Sampling there
+// rather than under the bar itself is the whole point — the bar is anchored
+// against that content, so it is what the bar has to stay readable on.
+std::optional<LogicalRect> Bar::immersiveSampleRegion(const BarInstance& instance) const {
+  const std::int32_t outputW = instance.outputLogicalWidth;
+  const std::int32_t outputH = instance.outputLogicalHeight;
+  if (outputW <= 0 || outputH <= 0) {
+    return std::nullopt;
+  }
+
+  // Region captures are in output-local logical coordinates. The bar's own
+  // surface geometry is already known in that space, so the sample starts just
+  // past the bar's inner edge and reaches a fixed distance into the window.
+  const auto& cfg = instance.barConfig;
+  const bool vertical = cfg.position == "left" || cfg.position == "right";
+  const std::int32_t thickness = std::max<std::int32_t>(cfg.thickness, 1);
+  const std::int32_t inset = thickness + std::max<std::int32_t>(cfg.marginEdge, 0);
+  const std::int32_t band = kImmersiveSampleBandPx;
+
+  if (vertical) {
+    const std::int32_t width = std::min(band, std::max(outputW - inset, 0));
+    if (width <= 0) {
+      return std::nullopt;
+    }
+    const std::int32_t x = cfg.position == "right" ? std::max(outputW - inset - width, 0) : inset;
+    return LogicalRect{.x = x, .y = 0, .width = width, .height = outputH};
+  }
+
+  const std::int32_t height = std::min(band, std::max(outputH - inset, 0));
+  if (height <= 0) {
+    return std::nullopt;
+  }
+  const std::int32_t y = cfg.position == "bottom" ? std::max(outputH - inset - height, 0) : inset;
+  return LogicalRect{.x = 0, .y = y, .width = outputW, .height = height};
+}
+
+void Bar::onImmersiveStateChanged() {
+  if (m_config == nullptr) {
+    return;
+  }
+  for (auto& instance : m_instances) {
+    if (instance == nullptr) {
+      continue;
+    }
+    if (immersiveWantsStyle(*instance)) {
+      scheduleImmersiveSample(*instance, kImmersiveInitialDelay);
+    } else {
+      clearImmersiveStyle(*instance);
+    }
+  }
+}
+
+// Immersive only has something to follow while a window actually fills the work
+// area the bar is anchored against. With no window, or only floating windows
+// sitting next to the bar, there is no content to be immersive with, and the bar
+// hands control back to the user's own opacity and colors.
+bool Bar::immersiveWantsStyle(const BarInstance& instance) const {
+  return instance.barConfig.immersive
+      && immersiveSupported()
+      && m_platform != nullptr
+      && m_platform->hasWorkAreaFillingWindow(instance.output);
+}
+
+void Bar::scheduleImmersiveSample(BarInstance& instance, std::chrono::milliseconds delay) {
+  // One shared debounce timer: window churn arrives as bursts, and the newest
+  // event is the one worth sampling, so pending outputs are coalesced rather
+  // than sampled per event.
+  m_immersivePendingOutputs.insert(instance.outputName);
+  m_immersiveDebounce.start(delay, [this]() {
+    auto pending = std::move(m_immersivePendingOutputs);
+    m_immersivePendingOutputs.clear();
+    for (auto& candidate : m_instances) {
+      if (candidate == nullptr || !pending.contains(candidate->outputName)) {
+        continue;
+      }
+      // Re-check the gate here rather than at schedule time: the whole point of
+      // the debounce is that the window picture may have moved on by the time it
+      // fires, and a window that stopped filling the work area has to fall back
+      // to the user's styling.
+      if (immersiveWantsStyle(*candidate)) {
+        sampleImmersive(*candidate);
+      } else {
+        clearImmersiveStyle(*candidate);
+      }
+    }
+  });
+}
+
+void Bar::sampleImmersive(BarInstance& instance) {
+  if (m_immersiveCaptureFailed || m_platform == nullptr || instance.output == nullptr) {
+    return;
+  }
+  const auto region = immersiveSampleRegion(instance);
+  if (!region.has_value()) {
+    return;
+  }
+
+  // The capture runs on its own connection: a compositor that rejects a
+  // screencopy request would otherwise kill the shell's primary display.
+  if (m_immersiveWayland == nullptr) {
+    auto connection = std::make_unique<WaylandConnection>(WaylandConnection::Purpose::Screencopy);
+    std::string setupError;
+    if (!connection->connectUntil(
+            std::chrono::steady_clock::now() + kImmersiveCaptureTimeout, &m_platform->wayland(), setupError
+        )) {
+      kLog.warn("immersive bar sampling unavailable: {}", setupError);
+      m_immersiveCaptureFailed = true;
+      return;
+    }
+    m_immersiveWayland = std::move(connection);
+    m_immersiveCapture = std::make_unique<ScreencopyCapture>(*m_immersiveWayland);
+  }
+  if (m_immersiveCapture == nullptr || !m_immersiveCapture->available()) {
+    return;
+  }
+
+  const auto& captureOutputs = m_immersiveWayland->outputs();
+  const auto target = std::ranges::find_if(captureOutputs, [&instance](const WaylandOutput& candidate) {
+    return candidate.name == instance.outputName;
+  });
+  if (target == captureOutputs.end() || target->output == nullptr) {
+    return;
+  }
+
+  ScreencopyImage image;
+  std::string error;
+  const auto status = screencopy::captureOutputRegionBlocking(
+      *m_immersiveCapture, *m_immersiveWayland, target->output, *region, image, error, &m_platform->wayland()
+  );
+  if (status != screencopy::CaptureOutputStatus::Success) {
+    if (status == screencopy::CaptureOutputStatus::EventLoopFailed) {
+      kLog.warn("immersive bar sampling disabled after capture failure: {}", error);
+      m_immersiveCaptureFailed = true;
+    }
+    return;
+  }
+
+  const auto sample = noctalia::bar::tint::reduce(image.rgba, image.width, image.height);
+  if (!sample.valid) {
+    return;
+  }
+
+  const bool blurred = m_platform->wayland().hasBackgroundEffectBlur();
+  const auto style = noctalia::bar::tint::derive(sample, colorForRole(ColorRole::OnSurface), blurred);
+
+  // Skip sub-perceptual changes: without this, content that shifts slightly on
+  // every frame (video, a blinking caret) would repaint the bar continuously.
+  if (instance.immersiveStyle.has_value()) {
+    const auto& current = *instance.immersiveStyle;
+    const float delta = std::abs(current.surface.r - style.surface.r)
+        + std::abs(current.surface.g - style.surface.g)
+        + std::abs(current.surface.b - style.surface.b)
+        + std::abs(current.opacity - style.opacity);
+    if (style.valid && delta < kImmersiveColorDelta) {
+      return;
+    }
+  }
+
+  applyImmersiveStyle(instance, style);
+}
+
+void Bar::applyImmersiveStyle(BarInstance& instance, const noctalia::bar::tint::Style& style) {
+  if (!style.valid) {
+    return;
+  }
+  instance.immersiveStyle = style;
+
+  const ColorSpec foreground = fixedColorSpec(style.foreground);
+  auto applyToWidgets = [&style, &foreground](std::vector<std::unique_ptr<Widget>>& widgets) {
+    for (auto& widget : widgets) {
+      if (widget == nullptr) {
+        continue;
+      }
+      widget->setImmersiveForeground(foreground);
+      widget->setImmersiveBackdrop(style.backdrop);
+    }
+  };
+  applyToWidgets(instance.startWidgets);
+  applyToWidgets(instance.centerWidgets);
+  applyToWidgets(instance.endWidgets);
+
+  applyBackgroundPalette(instance);
+  // Capsule fills are resolved against the palette when the run is built, so an
+  // immersive change has to re-resolve them through the normal style path.
+  applyBarCapsuleStyles(instance);
+  if (instance.surface != nullptr) {
+    instance.surface->requestRedraw();
+  }
+}
+
+void Bar::clearImmersiveStyle(BarInstance& instance) {
+  if (!instance.immersiveStyle.has_value()) {
+    return;
+  }
+  instance.immersiveStyle.reset();
+
+  auto clearWidgets = [](std::vector<std::unique_ptr<Widget>>& widgets) {
+    for (auto& widget : widgets) {
+      if (widget == nullptr) {
+        continue;
+      }
+      widget->setImmersiveForeground(std::nullopt);
+      widget->setImmersiveBackdrop(std::nullopt);
+    }
+  };
+  clearWidgets(instance.startWidgets);
+  clearWidgets(instance.centerWidgets);
+  clearWidgets(instance.endWidgets);
+
+  applyBackgroundPalette(instance);
+  applyBarCapsuleStyles(instance);
+  if (instance.surface != nullptr) {
+    instance.surface->requestRedraw();
+  }
+}
+
+void Bar::applyBarCapsuleStyles(BarInstance& instance) {
+  auto paintRuns = [&instance](std::vector<BarCapsuleRun>& runs) {
+    for (auto& run : runs) {
+      if (run.bg == nullptr) {
+        continue;
+      }
+      if (instance.immersiveStyle.has_value()) {
+        // Capsules sit on the bar's own surface, so they lift slightly from it
+        // rather than reusing the surface color, which would erase them. The
+        // user's capsule opacity stays meaningful as a fraction of the bar's own
+        // derived opacity, so the two read as one material.
+        const auto& surface = instance.immersiveStyle->surface;
+        const bool lightSurface = relativeLuminance(surface) > 0.179F;
+        const Color lifted = lightSurface ? brighten(surface, 1.12F) : brighten(surface, 1.45F);
+        const float alpha = std::clamp(instance.immersiveStyle->opacity * run.spec.opacity, 0.0F, 1.0F);
+        run.bg->setFill(withAlpha(lifted, alpha));
+      } else {
+        run.bg->setFill(scaleAlpha(run.spec.fill, run.spec.opacity));
+      }
+      if (run.spec.border.has_value()) {
+        run.bg->setBorder(*run.spec.border, run.spec.borderWidth * run.contentScale);
+      } else {
+        run.bg->clearBorder();
+      }
+    }
+  };
+  paintRuns(instance.startCapsuleRuns);
+  paintRuns(instance.centerCapsuleRuns);
+  paintRuns(instance.endCapsuleRuns);
 }
 
 void Bar::syncBarAutoHideInputRegion(BarInstance& instance) const {

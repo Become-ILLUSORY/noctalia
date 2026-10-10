@@ -5,6 +5,7 @@
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
 #include "render/scene/node.h"
+#include "shell/bar/bar_tint.h"
 #include "shell/bar/widget.h"
 #include "shell/panel/attached_panel_context.h"
 #include "ui/signal.h"
@@ -107,4 +108,9 @@ struct BarInstance {
 
   Signal<>::ScopedConnection paletteConn;
   std::optional<AttachedPanelGeometry> attachedPanelGeometry;
+
+  // Immersive: the style derived from the content this bar abuts. Present only
+  // while immersive is on; it takes precedence over the palette-driven colors
+  // everywhere the bar paints its own chrome.
+  std::optional<noctalia::bar::tint::Style> immersiveStyle;
 };

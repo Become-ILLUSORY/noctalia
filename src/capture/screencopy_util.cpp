@@ -192,46 +192,34 @@ namespace {
     screencopy::orientCaptureForTransform(image, transform);
   }
 
-} // namespace
-
-namespace screencopy {
-
-  void orientCaptureForTransform(ScreencopyImage& image, std::int32_t transform) {
-    if (image.yInvert) {
-      flipRgbaVertical(image);
-      image.yInvert = false;
-    }
-    applyOutputTransform(image, transform);
-  }
-
-  void transformCapture(ScreencopyImage& image, std::int32_t transform) { applyOutputTransform(image, transform); }
-
-  CaptureOutputStatus captureOutputBlocking(
-      ScreencopyCapture& capture, WaylandConnection& wayland, wl_output* output, ScreencopyImage& out,
-      std::string& error, bool overlayCursor, WaylandConnection* eventConnection,
+  // Shared body of the blocking capture helpers: one screencopy frame, then a
+  // bounded event-loop pump until it lands. `region` nullopt captures the whole
+  // output.
+  [[nodiscard]] screencopy::CaptureOutputStatus captureRegionBlocking(
+      ScreencopyCapture& capture, WaylandConnection& wayland, wl_output* output, std::optional<LogicalRect> region,
+      bool overlayCursor, ScreencopyImage& out, std::string& error, WaylandConnection* eventConnection,
       std::optional<std::chrono::steady_clock::time_point> deadline
   ) {
     error.clear();
-    const auto captureDeadline = deadline.value_or(std::chrono::steady_clock::now() + kBlockingCaptureTimeout);
+    const auto captureDeadline =
+        deadline.value_or(std::chrono::steady_clock::now() + screencopy::kBlockingCaptureTimeout);
     if (std::chrono::steady_clock::now() >= captureDeadline) {
       error = "screencopy capture timed out";
-      return CaptureOutputStatus::CaptureFailed;
+      return screencopy::CaptureOutputStatus::CaptureFailed;
     }
 
     bool finished = false;
-    capture.capture(
-        output, std::nullopt, overlayCursor, [&](std::optional<ScreencopyImage> image, const std::string& err) {
-          finished = true;
-          if (!err.empty() || !image.has_value()) {
-            error = err.empty() ? "screencopy capture failed" : err;
-            return;
-          }
-          out = std::move(*image);
-        }
-    );
+    capture.capture(output, region, overlayCursor, [&](std::optional<ScreencopyImage> image, const std::string& err) {
+      finished = true;
+      if (!err.empty() || !image.has_value()) {
+        error = err.empty() ? "screencopy capture failed" : err;
+        return;
+      }
+      out = std::move(*image);
+    });
 
     if (!error.empty()) {
-      return CaptureOutputStatus::CaptureFailed;
+      return screencopy::CaptureOutputStatus::CaptureFailed;
     }
 
     const std::array targets{
@@ -252,25 +240,57 @@ namespace screencopy {
       capture.cancelInFlight();
       if (waitResult.status == wayland::DispatchStatus::TimedOut) {
         error = "screencopy capture timed out";
-        return CaptureOutputStatus::CaptureFailed;
+        return screencopy::CaptureOutputStatus::CaptureFailed;
       }
       error = waitResult.error;
-      return CaptureOutputStatus::EventLoopFailed;
+      return screencopy::CaptureOutputStatus::EventLoopFailed;
     }
 
     if (!error.empty() || !finished) {
       if (error.empty()) {
         error = "screencopy capture failed";
       }
-      return CaptureOutputStatus::CaptureFailed;
+      return screencopy::CaptureOutputStatus::CaptureFailed;
     }
 
     if (out.width <= 0 || out.height <= 0 || out.rgba.empty()) {
       error = "screencopy capture returned an empty frame";
-      return CaptureOutputStatus::CaptureFailed;
+      return screencopy::CaptureOutputStatus::CaptureFailed;
     }
 
-    return CaptureOutputStatus::Success;
+    return screencopy::CaptureOutputStatus::Success;
+  }
+
+} // namespace
+
+namespace screencopy {
+
+  void orientCaptureForTransform(ScreencopyImage& image, std::int32_t transform) {
+    if (image.yInvert) {
+      flipRgbaVertical(image);
+      image.yInvert = false;
+    }
+    applyOutputTransform(image, transform);
+  }
+
+  void transformCapture(ScreencopyImage& image, std::int32_t transform) { applyOutputTransform(image, transform); }
+
+  CaptureOutputStatus captureOutputBlocking(
+      ScreencopyCapture& capture, WaylandConnection& wayland, wl_output* output, ScreencopyImage& out,
+      std::string& error, bool overlayCursor, WaylandConnection* eventConnection,
+      std::optional<std::chrono::steady_clock::time_point> deadline
+  ) {
+    return captureRegionBlocking(
+        capture, wayland, output, std::nullopt, overlayCursor, out, error, eventConnection, deadline
+    );
+  }
+
+  CaptureOutputStatus captureOutputRegionBlocking(
+      ScreencopyCapture& capture, WaylandConnection& wayland, wl_output* output, LogicalRect region,
+      ScreencopyImage& out, std::string& error, WaylandConnection* eventConnection,
+      std::optional<std::chrono::steady_clock::time_point> deadline
+  ) {
+    return captureRegionBlocking(capture, wayland, output, region, false, out, error, eventConnection, deadline);
   }
 
   bool orientCaptureNative(ScreencopyImage& image, const WaylandConnection& wayland, wl_output* output) {

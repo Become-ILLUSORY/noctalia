@@ -1978,6 +1978,10 @@
           "description": "Softly tint the widget under the mouse pointer with its own foreground color",
           "label": "Hover Highlight"
         },
+        "immersive": {
+          "label": "Immersive",
+          "description": "Derive the bar's background, opacity, and text color from the window filling the screen behind it, the way a phone status bar follows the app under it. While a window fills the work area the bar takes over background_opacity, compositor_blur, and the widget colors; when no window abuts the bar those settings apply again."
+        },
         "layer": {
           "description": "Use Overlay to show the bar above fullscreen apps; attached panels follow the bar",
           "label": "Wayland Layer"

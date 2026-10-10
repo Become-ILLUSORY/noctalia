@@ -75,6 +75,7 @@ struct BarMonitorOverride {
   std::optional<std::int32_t> thickness;
   std::optional<float> backgroundOpacity;
   std::optional<bool> compositorBlur;
+  std::optional<bool> immersive;
   std::optional<ColorSpec> border;
   std::optional<float> borderWidth;
   std::optional<std::int32_t> radius;
@@ -146,6 +147,11 @@ struct BarConfig {
   std::int32_t thickness = Style::barThicknessDefault;
   float backgroundOpacity = 1.0F;
   bool compositorBlur = true;
+  // Immersive: sample the screen content next to the bar and derive its surface,
+  // opacity, and foreground from it. While enabled it owns `backgroundOpacity`,
+  // `compositorBlur`, and the widget foreground colors — those settings stay in
+  // the config for when immersive is switched back off, but do not apply.
+  bool immersive = false;
   // Inside outline for the bar background; attached panels inherit the resolved values.
   ColorSpec border = colorSpecFromRole(ColorRole::Outline);
   float borderWidth = 0.0F;
