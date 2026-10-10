@@ -24,9 +24,9 @@ jobs:
     steps:
       - name: Install tooling
         run: |
-          # base-devel covers meson/ninja/pkgconf; the rest are this PKGBUILD's
-          # makedepends, installed up front so the build is deterministic rather
-          # than letting makepkg pull them mid-run.
+          # base-devel covers makepkg, meson, ninja and pkgconf; the rest are
+          # this PKGBUILD's makedepends, installed up front so the build is
+          # deterministic instead of letting makepkg pull them mid-run.
           pacman -Syu --noconfirm --needed \
             base-devel git sudo namcap \
             nlohmann-json stb wayland-protocols
@@ -36,7 +36,7 @@ jobs:
           path: noctalia-src
 
       # makepkg refuses to run as root and containers are root, so hand the
-      # build to an unprivileged user, the way Arch's packaging docs suggest.
+      # build to an unprivileged user, as Arch's packaging docs suggest.
       - name: Create build user
         run: |
           useradd -m builder
@@ -45,7 +45,7 @@ jobs:
       - name: Build package
         run: |
           set -euo pipefail
-          # Build out of the runner's workspace: the build user must own the
+          # Build outside the runner workspace: the build user has to own the
           # whole tree, and makepkg writes its artifacts beside the PKGBUILD.
           install -d -o builder -g builder /home/builder/src
           cp -a noctalia-src/. /home/builder/src/
