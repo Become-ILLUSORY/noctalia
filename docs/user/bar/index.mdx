@@ -25,6 +25,7 @@ layer              = "top"       # top | overlay; overlay appears above fullscre
 thickness          = 34          # bar cross-axis size in pixels (height for horizontal, width for vertical)
 background_opacity = 1.0         # 0.0 (transparent) to 1.0 (opaque)
 compositor_blur    = true        # publish a compositor blur region for this bar
+immersive          = false       # derive the bar's colors from the window abutting it
 border             = "outline"   # color role or #RRGGBB for the bar outline
 border_width       = 0.0         # inside outline width in pixels; 0 disables it
 shadow             = true        # cast the global [shell.shadow]
@@ -160,6 +161,32 @@ Shadow blur, offset, and alpha are global under `[shell.shadow]`. Bars only expo
 `font_family` sets the typeface for this bar's widget labels. Leave it empty (the default) to inherit the global `[shell] font_family`. A single widget can override it with `[widget.<name>] font_family`, and it can be set per monitor with a `[bar.<name>.monitor.*]` override. The Settings GUI exposes a searchable font picker under **Bar → Widgets**, with a per-widget picker in each widget's settings.
 
 `border_width` draws an inside outline using `border`. Attached panels stay borderless so they remain visually clean against the bar.
+
+---
+
+## Immersive
+
+`immersive = true` makes the bar derive its own look from the screen content it abuts, the way a phone's status bar follows the app behind it: background color, opacity, and the text and icon colors all come from the window that is flush against the bar's inner edge.
+
+```toml
+[bar.default]
+immersive = true
+```
+
+While immersive is active it owns `background_opacity`, `compositor_blur`, and the widget foreground colors, so those settings do not apply. They are not discarded: switch `immersive` back off and your configured values take over again. The `border` and `border_width` you set still apply, so the outline keeps matching the rest of the shell.
+
+**When it applies.** Immersive only engages while a window actually fills the work area the bar is anchored against:
+
+- A window the compositor reports as maximized or fullscreen on that monitor, or
+- an occupied workspace on a tiling compositor, where ordinary windows reach the bar's inner edge without ever being "maximized".
+
+With no window open, or with only floating windows sitting next to the bar, there is nothing to be immersive with, and the bar returns to your own `background_opacity`, `compositor_blur`, and colors. This is what makes the setting safe to leave on: the derived styling is never applied to a wallpaper, and a bar that floats over fullscreen content (`reserve_space = false`) or slides away (`auto_hide`) is left alone entirely.
+
+**How the colors are chosen.** The bar samples a thin strip of the window's edge rather than the wallpaper, ignoring the brightness extremes a window's own title bar or scrollbar contributes. The foreground keeps the hue and chroma of your theme's `on_surface` and moves only in lightness until it clears WCAG AA contrast against the bar's actual composited background — so a saturated blue backdrop takes dark text and stays blue, instead of flipping to a muddy orange as a plain color inversion would. Opacity rises with how busy the content is and with a background whose lightness runs against your theme, and blur is assumed to be on, since the derived color is what keeps the bar readable.
+
+Semantic accents keep their meaning: a low battery or a muted volume still shows in its warning color, corrected only as far as the 3:1 non-text contrast floor so it stays legible on any background instead of being flattened into the normal text color.
+
+**Cost and smoothing.** Sampling uses screencopy on its own connection, so a compositor that rejects a capture cannot take the shell down with it. Samples are debounced and skipped when the derived color has not moved perceptibly, so window churn and video playback cannot make the bar flicker. On a compositor without `zwlr-screencopy` the setting has no effect, and the Settings GUI does not offer it.
 
 ---
 

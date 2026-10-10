@@ -3189,11 +3189,19 @@ void Bar::onImmersiveStateChanged() {
 // area the bar is anchored against. With no window, or only floating windows
 // sitting next to the bar, there is no content to be immersive with, and the bar
 // hands control back to the user's own opacity and colors.
+//
+// The feature is for a bar that behaves like a status bar: reserving its edge
+// and staying on screen. A bar that floats over fullscreen content
+// (reserve_space off) or slides away has no stable content abutting it, so
+// immersive stays out of the way and the user's styling applies.
 bool Bar::immersiveWantsStyle(const BarInstance& instance) const {
-  return instance.barConfig.immersive
-      && immersiveSupported()
-      && m_platform != nullptr
-      && m_platform->hasWorkAreaFillingWindow(instance.output);
+  if (!instance.barConfig.immersive || !instance.barConfig.reserveSpace || !immersiveSupported()) {
+    return false;
+  }
+  if (instance.barConfig.isAutoHideEnabled() && instance.hideOpacity <= 0.001F) {
+    return false;
+  }
+  return m_platform != nullptr && m_platform->hasWorkAreaFillingWindow(instance.output);
 }
 
 void Bar::scheduleImmersiveSample(BarInstance& instance, std::chrono::milliseconds delay) {
