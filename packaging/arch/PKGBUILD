@@ -21,7 +21,7 @@ pkgver=5.2.1
 # normal upgrade instead of warning that the package is already up to date.
 # When upstream ships a newer pkgver, pacman will upgrade to the official build
 # and the immersive bar goes away until this package is rebuilt.
-pkgrel=2
+pkgrel=3
 pkgdesc='A sleek, customizable desktop shell crafted for Wayland (immersive bar tint fork)'
 arch=('x86_64' 'aarch64')
 url="https://github.com/Become-ILLUSORY/noctalia"
