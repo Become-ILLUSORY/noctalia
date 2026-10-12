@@ -101,6 +101,10 @@ private:
     bool urgent = false;
     std::int32_t x = 0;
     std::int32_t y = 0;
+    // Window extent, for the immersive bar's abutting test. Zero when the IPC
+    // response did not carry it.
+    std::int32_t width = 0;
+    std::int32_t height = 0;
   };
 
   void refreshSnapshot();

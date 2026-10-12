@@ -22,6 +22,7 @@
 #include "compositors/umbriel/umbriel_output_backend.h"
 #include "compositors/umbriel/umbriel_runtime.h"
 #include "compositors/umbriel/umbriel_workspace_backend.h"
+#include "compositors/window_abut.h"
 #include "compositors/workspace_alert_service.h"
 #include "core/log.h"
 #include "core/process/process.h"
@@ -1358,19 +1359,49 @@ std::vector<std::string> CompositorPlatform::workspaceDisplayKeys(wl_output* out
   return {};
 }
 
-bool CompositorPlatform::hasWorkAreaFillingWindow(wl_output* output) const {
+// Whether a window filling its work area sits on `output`. This is the state in
+// which a bar anchored against that work area is genuinely abutting content, so
+// it is what an immersive bar samples for.
+//
+// The signal is the `maximized` / `fullscreen` state that the standard
+// zwlr-foreign-toplevel-management protocol reports, which makes this work on
+// every compositor implementing it rather than on one backend's IPC. Tiling
+// compositors that fill the work area also report maximized for the tiled
+// window (niri does), so no per-compositor fallback is needed — and an earlier
+// one that treated "active workspace is occupied" as equivalent was wrong: a
+// floating window on a busy workspace does not reach the bar's edge, and
+// sampling then picked up the wallpaper behind it.
+// Whether a window abuts the bar's inner edge on `output`.
+//
+// Two signals, in order of reliability:
+//
+//  1. The `maximized` / `fullscreen` state from zwlr-foreign-toplevel-management.
+//     This is the standard protocol, so it works on every compositor that
+//     implements it rather than one backend's IPC — no per-compositor code.
+//
+//  2. Geometry. A maximized flag alone is not enough: a tiling compositor fills
+//     the work area with ordinary windows that are never reported as maximized
+//     (niri's scrolling columns), and those are exactly the windows that touch
+//     the bar. So a window whose reported rectangle starts at the bar's inner
+//     edge also counts. Floating windows are excluded outright — they never
+//     reach the edge, and sampling the wallpaper behind one is the bug this
+//     guards against.
+//
+// `innerEdge` is the bar's inner edge in output-local logical pixels, along the
+// bar's cross axis (y for a horizontal bar, x for a vertical one).
+bool CompositorPlatform::hasWorkAreaFillingWindow(wl_output* output, std::int32_t innerEdge, bool vertical) const {
   if (output == nullptr) {
     return false;
   }
 
-  // Precise signal: a toplevel the compositor reports as maximized or
-  // fullscreen on this output. Available wherever wlr-foreign-toplevel-management
-  // is, and covers the floating-WM case exactly.
+  // Signal 1: the compositor says a window is maximized/fullscreen here.
   bool maximized = false;
   m_wayland.visitWlrToplevels([&](const WlrToplevelSnapshot& toplevel) {
     if (maximized || toplevel.minimized) {
       return;
     }
+    // A toplevel the compositor has not yet placed on an output cannot be said
+    // to abut this one; ignore it rather than assuming.
     if (toplevel.output != output) {
       return;
     }
@@ -1382,17 +1413,9 @@ bool CompositorPlatform::hasWorkAreaFillingWindow(wl_output* output) const {
     return true;
   }
 
-  // Tiling compositors fill the work area with ordinary windows that are never
-  // reported as "maximized" — niri's scrolling columns are the canonical case,
-  // and niri is exactly where this feature matters. For those, an occupied
-  // active workspace on this output is the same statement: content reaches the
-  // bar's inner edge.
-  for (const auto& workspace : workspaces(output)) {
-    if (workspace.active) {
-      return workspace.occupied;
-    }
-  }
-  return false;
+  // Signal 2: geometry. Only meaningful once the backend reports window extents;
+  // when it does not, this is a no-op and signal 1 stands alone.
+  return compositors::anyWindowAbutsEdge(workspaceWindowAssignments(output), innerEdge, vertical);
 }
 
 std::vector<WorkspaceWindowAssignment> CompositorPlatform::workspaceWindowAssignments(wl_output* outputFilter) const {

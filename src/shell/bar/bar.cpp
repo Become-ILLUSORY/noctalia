@@ -51,6 +51,9 @@ namespace {
   // capture runs, and the per-channel change below which a derived style is not
   // worth a repaint.
   constexpr std::int32_t kImmersiveSampleBandPx = 24;
+  // Extra pixels skipped past the bar's own shadow bleed before sampling, so the
+  // soft edge of the blur cannot be picked up as content.
+  constexpr std::int32_t kImmersiveShadowMarginPx = 6;
   constexpr std::chrono::milliseconds kImmersiveInitialDelay{250};
   constexpr std::chrono::milliseconds kImmersiveChangeDelay{120};
   constexpr auto kImmersiveCaptureTimeout = std::chrono::milliseconds(500);
@@ -3139,34 +3142,65 @@ bool Bar::immersiveSupported() const noexcept {
 std::optional<LogicalRect> Bar::immersiveSampleRegion(const BarInstance& instance) const {
   const std::int32_t outputW = instance.outputLogicalWidth;
   const std::int32_t outputH = instance.outputLogicalHeight;
-  if (outputW <= 0 || outputH <= 0) {
+  if (outputW <= 0 || outputH <= 0 || instance.surface == nullptr || m_platform == nullptr) {
     return std::nullopt;
   }
 
-  // Region captures are in output-local logical coordinates. The bar's own
-  // surface geometry is already known in that space, so the sample starts just
-  // past the bar's inner edge and reaches a fixed distance into the window.
+  // Region captures are in output-local logical coordinates, while the bar's
+  // geometry is expressed inside its own layer surface. Convert between the two
+  // through the surface's origin rather than assuming the bar sits flush against
+  // the output edge: with a margin or a shadow bleed it does not, and sampling
+  // at the wrong offset lands on the bar's own shadow — which reads back as a
+  // dark strip and tints the bar with itself.
   const auto& cfg = instance.barConfig;
-  const bool vertical = cfg.position == "left" || cfg.position == "right";
-  const std::int32_t thickness = std::max<std::int32_t>(cfg.thickness, 1);
-  const std::int32_t inset = thickness + std::max<std::int32_t>(cfg.marginEdge, 0);
+  const auto& shadowConfig = m_config->config().shell.shadow;
+  const auto surfaceWidth = static_cast<float>(instance.surface->width());
+  const auto surfaceHeight = static_cast<float>(instance.surface->height());
+  if (surfaceWidth <= 0.0F || surfaceHeight <= 0.0F) {
+    return std::nullopt;
+  }
+
+  const WaylandOutput* outputInfo = m_platform->findOutputByWl(instance.output);
+  if (outputInfo == nullptr) {
+    return std::nullopt;
+  }
+
+  const auto visual = computeBarVisualGeometry(
+      cfg, shadowConfig, surfaceWidth, surfaceHeight,
+      barInnerSurfaceExtension(cfg, shadowConfig, surfaceWidth, surfaceHeight)
+  );
+  const auto origin = surfaceOriginForOutputLocal(instance, *outputInfo);
+
   const std::int32_t band = kImmersiveSampleBandPx;
+  const bool vertical = cfg.position == "left" || cfg.position == "right";
+
+  // Start past the bar's own shadow. The shadow is drawn *outside* the bar body,
+  // so sampling straight from the inner edge would capture the bar's own dark
+  // bleed — which reads back as a dark strip and tints the bar with itself
+  // rather than with the window. The bleed is what the bar reserves on its inner
+  // side; add a small floor so the very edge of the blur is skipped too.
+  const auto bleed = shell::surface_shadow::bleed(cfg.shadow, shadowConfig);
+  const std::int32_t innerBleed = vertical ? bleed.right : bleed.down;
+  const std::int32_t shadowSkip = std::max(innerBleed, 0) + kImmersiveShadowMarginPx;
 
   if (vertical) {
-    const std::int32_t width = std::min(band, std::max(outputW - inset, 0));
+    // Inner edge of the bar along X, then reach `band` pixels into the content.
+    const float barInnerX = visual.x + visual.width;
+    const std::int32_t inner = static_cast<std::int32_t>(std::lround(origin.first + barInnerX)) + shadowSkip;
+    const std::int32_t width = std::min(band, std::max(outputW - inner, 0));
     if (width <= 0) {
       return std::nullopt;
     }
-    const std::int32_t x = cfg.position == "right" ? std::max(outputW - inset - width, 0) : inset;
-    return LogicalRect{.x = x, .y = 0, .width = width, .height = outputH};
+    return LogicalRect{.x = inner, .y = 0, .width = width, .height = outputH};
   }
 
-  const std::int32_t height = std::min(band, std::max(outputH - inset, 0));
+  const float barInnerY = visual.y + visual.height;
+  const std::int32_t inner = static_cast<std::int32_t>(std::lround(origin.second + barInnerY)) + shadowSkip;
+  const std::int32_t height = std::min(band, std::max(outputH - inner, 0));
   if (height <= 0) {
     return std::nullopt;
   }
-  const std::int32_t y = cfg.position == "bottom" ? std::max(outputH - inset - height, 0) : inset;
-  return LogicalRect{.x = 0, .y = y, .width = outputW, .height = height};
+  return LogicalRect{.x = 0, .y = inner, .width = outputW, .height = height};
 }
 
 void Bar::onImmersiveStateChanged() {
@@ -3185,15 +3219,15 @@ void Bar::onImmersiveStateChanged() {
   }
 }
 
-// Immersive only has something to follow while a window actually fills the work
-// area the bar is anchored against. With no window, or only floating windows
-// sitting next to the bar, there is no content to be immersive with, and the bar
-// hands control back to the user's own opacity and colors.
+// Immersive only has something to follow while a window actually abuts the bar.
+// With no window touching it — or only floating windows with a gap — there is
+// nothing to be immersive with, and the bar hands control back to the user's own
+// opacity, blur, and colors.
 //
 // The feature is for a bar that behaves like a status bar: reserving its edge
 // and staying on screen. A bar that floats over fullscreen content
 // (reserve_space off) or slides away has no stable content abutting it, so
-// immersive stays out of the way and the user's styling applies.
+// immersive stays out of the way.
 bool Bar::immersiveWantsStyle(const BarInstance& instance) const {
   if (!instance.barConfig.immersive || !instance.barConfig.reserveSpace || !immersiveSupported()) {
     return false;
@@ -3201,7 +3235,34 @@ bool Bar::immersiveWantsStyle(const BarInstance& instance) const {
   if (instance.barConfig.isAutoHideEnabled() && instance.hideOpacity <= 0.001F) {
     return false;
   }
-  return m_platform != nullptr && m_platform->hasWorkAreaFillingWindow(instance.output);
+  if (m_platform == nullptr || instance.surface == nullptr || m_config == nullptr) {
+    return false;
+  }
+
+  const auto& cfg = instance.barConfig;
+  const auto& shadowConfig = m_config->config().shell.shadow;
+  const auto surfaceWidth = static_cast<float>(instance.surface->width());
+  const auto surfaceHeight = static_cast<float>(instance.surface->height());
+  if (surfaceWidth <= 0.0F || surfaceHeight <= 0.0F) {
+    return false;
+  }
+
+  const WaylandOutput* outputInfo = m_platform->findOutputByWl(instance.output);
+  if (outputInfo == nullptr) {
+    return false;
+  }
+
+  const bool vertical = cfg.position == "left" || cfg.position == "right";
+  const auto visual = computeBarVisualGeometry(
+      cfg, shadowConfig, surfaceWidth, surfaceHeight,
+      barInnerSurfaceExtension(cfg, shadowConfig, surfaceWidth, surfaceHeight)
+  );
+  const auto origin = surfaceOriginForOutputLocal(instance, *outputInfo);
+  const std::int32_t innerEdge = vertical
+      ? static_cast<std::int32_t>(std::lround(origin.first + visual.x + visual.width))
+      : static_cast<std::int32_t>(std::lround(origin.second + visual.y + visual.height));
+
+  return m_platform->hasWorkAreaFillingWindow(instance.output, innerEdge, vertical);
 }
 
 void Bar::scheduleImmersiveSample(BarInstance& instance, std::chrono::milliseconds delay) {

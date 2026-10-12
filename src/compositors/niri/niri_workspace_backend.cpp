@@ -292,6 +292,8 @@ std::vector<WorkspaceWindow> NiriWorkspaceBackend::workspaceWindows(const std::s
             .title = window.title,
             .x = window.x,
             .y = window.y,
+            .width = window.hasTileGeometry && !window.isFloating ? window.tileWidth : 0,
+            .height = window.hasTileGeometry && !window.isFloating ? window.tileHeight : 0,
             .outputName = {},
         }
     );
@@ -675,6 +677,34 @@ bool NiriWorkspaceBackend::applyWindowFields(const nlohmann::json& json, WindowS
 
   if (json.contains("layout")) {
     const auto& layout = json["layout"];
+    // Screen-space geometry, in output-local logical pixels. This is what lets
+    // the immersive bar decide whether a window actually abuts it; the
+    // scrolling-layout position below is a column/tile index, not a coordinate,
+    // and cannot answer that.
+    if (layout.contains("tile_pos_in_workspace_view")) {
+      const auto& pos = layout["tile_pos_in_workspace_view"];
+      if (pos.is_array() && pos.size() >= 2) {
+        state.tileX = static_cast<std::int32_t>(std::lround(pos[0].get<double>()));
+        state.tileY = static_cast<std::int32_t>(std::lround(pos[1].get<double>()));
+        state.hasTileGeometry = true;
+        changed = true;
+      }
+    }
+    if (layout.contains("tile_size")) {
+      const auto& size = layout["tile_size"];
+      if (size.is_array() && size.size() >= 2) {
+        state.tileWidth = static_cast<std::int32_t>(std::lround(size[0].get<double>()));
+        state.tileHeight = static_cast<std::int32_t>(std::lround(size[1].get<double>()));
+        state.hasTileGeometry = true;
+        changed = true;
+      }
+    }
+    // Windowed (floating) windows report their own size; a floating window never
+    // reaches the bar's edge, so its geometry is not used for the abutting test.
+    if (layout.contains("is_floating")) {
+      state.isFloating = layout["is_floating"].get<bool>();
+      changed = true;
+    }
     if (layout.contains("pos_in_scrolling_layout")) {
       const auto& pos = layout["pos_in_scrolling_layout"];
       if (pos.is_array() && pos.size() >= 2) {

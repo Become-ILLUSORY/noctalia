@@ -30,6 +30,10 @@ struct WorkspaceWindow {
   std::string title;
   std::int32_t x = 0;
   std::int32_t y = 0;
+  // Window extent in output-local logical pixels. Zero when the backend cannot
+  // report it, which callers must treat as "unknown" rather than "empty".
+  std::int32_t width = 0;
+  std::int32_t height = 0;
   std::string outputName;
 };
 
@@ -40,6 +44,8 @@ struct WorkspaceWindowAssignment {
   std::string title;
   std::int32_t x = 0;
   std::int32_t y = 0;
+  std::int32_t width = 0;
+  std::int32_t height = 0;
 };
 
 struct TaskbarWindowCandidate {

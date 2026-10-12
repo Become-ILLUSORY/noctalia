@@ -154,12 +154,14 @@ public:
   [[nodiscard]] std::vector<std::string> workspaceDisplayKeys(wl_output* outputFilter = nullptr) const;
   [[nodiscard]] std::vector<WorkspaceWindowAssignment>
   workspaceWindowAssignments(wl_output* outputFilter = nullptr) const;
-  // True when a window filling its work area sits on `output` — the state in
-  // which a bar anchored against that work area is genuinely abutting content.
-  // Immersive bars use this to sample only when there is something to sample:
-  // with no window, or only floating windows next to the bar, the bar keeps the
-  // user's own styling.
-  [[nodiscard]] bool hasWorkAreaFillingWindow(wl_output* output) const;
+  // True when a window abuts the bar's inner edge on `output` — the state in
+  // which a bar anchored against that edge is genuinely touching content.
+  // Immersive bars sample only then: with no such window the bar keeps the
+  // user's own background, opacity, and blur.
+  //
+  // `innerEdge` is the bar's inner edge in output-local logical pixels along the
+  // bar's cross axis (y for a horizontal bar, x for a vertical one).
+  [[nodiscard]] bool hasWorkAreaFillingWindow(wl_output* output, std::int32_t innerEdge, bool vertical) const;
   // Workspace keys of the overlay workspaces currently open on `outputFilter`
   // (nullptr = every output). Empty unless the active workspace backend tracks them.
   [[nodiscard]] std::vector<std::string> openOverlayWorkspaceKeys(wl_output* outputFilter = nullptr) const;

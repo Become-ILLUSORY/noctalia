@@ -177,6 +177,8 @@ std::vector<WorkspaceWindow> HyprlandWorkspaceBackend::workspaceWindows(wl_outpu
             .title = toplevel.title,
             .x = toplevel.x,
             .y = toplevel.y,
+            .width = toplevel.width,
+            .height = toplevel.height,
             .outputName = {},
         }
     );
@@ -583,6 +585,10 @@ void HyprlandWorkspaceBackend::refreshClients() {
     if (const auto atIt = item.find("at"); atIt != item.end() && atIt->is_array() && atIt->size() >= 2) {
       state.x = (*atIt)[0].get<std::int32_t>();
       state.y = (*atIt)[1].get<std::int32_t>();
+    }
+    if (const auto sizeIt = item.find("size"); sizeIt != item.end() && sizeIt->is_array() && sizeIt->size() >= 2) {
+      state.width = (*sizeIt)[0].get<std::int32_t>();
+      state.height = (*sizeIt)[1].get<std::int32_t>();
     }
 
     bool urgent = false;

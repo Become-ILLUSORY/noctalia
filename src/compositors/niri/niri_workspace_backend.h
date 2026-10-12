@@ -54,6 +54,17 @@ private:
     std::string title;
     std::int32_t x = 0;
     std::int32_t y = 0;
+    // Screen-space placement, in output-local logical pixels. Present once the
+    // compositor has laid the window out; `hasTileGeometry` distinguishes "not
+    // reported yet" from a zero-sized tile.
+    std::int32_t tileX = 0;
+    std::int32_t tileY = 0;
+    std::int32_t tileWidth = 0;
+    std::int32_t tileHeight = 0;
+    bool hasTileGeometry = false;
+    // Floating windows never reach the bar's edge, so they are excluded from
+    // the abutting test regardless of their coordinates.
+    bool isFloating = false;
 
     bool operator==(const WindowState&) const = default;
   };
